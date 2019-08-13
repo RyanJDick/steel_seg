@@ -2,8 +2,10 @@ import os
 import random
 import glob
 from collections import defaultdict
+from datetime import datetime
 
 import yaml
+import json
 import numpy as np
 import tensorflow as tf
 from PIL import Image
@@ -13,34 +15,93 @@ def _bytes_feature(value):
     return tf.train.Feature(bytes_list=tf.train.BytesList(value=[value]))
 
 
+def rle_to_dense(rle, img_height, img_width):
+    '''Convert the rle representation of a single class mask to the equivalent dense binary np
+    array.
+    '''
+    if rle is None or rle == '':
+        return np.zeros((img_height, img_width), dtype=np.uint8)
+    rle_list = rle.strip().split(' ')
+    rle_pairs = [(int(rle_list[i]), int(rle_list[i+1])) for i in range(0, len(rle_list), 2)]
+
+    dense_1d_array = np.zeros(img_height * img_width, dtype=np.uint8)
+    for rle_start, rle_run in rle_pairs:
+        # Subtract 1 from indices because pixel indices start at 1 rather than 0
+        dense_1d_array[rle_start - 1:rle_start + rle_run - 1] = 1
+    
+    # Use Fortran ordering, meaning that the first index changes fastest (sort of unconventional)
+    dense_2d_array = np.reshape(dense_1d_array, (img_height, img_width), order='F')
+    return dense_2d_array
+
+
 class SeverstalSteelDataset():
-    def __init__(self, config_path):
+    def __init__(self,
+                 train_img_dir,
+                 train_anns_file,
+                 img_height,
+                 img_width,
+                 num_classes,
+                 val_split,
+                 batch_size,
+                 train_tfrecord_dir,
+                 train_base_tfrecord_filename,
+                 val_tfrecord_dir,
+                 val_base_tfrecord_filename,
+                 examples_per_tfrecord,
+                 brightness_max_delta,
+                 contrast_lower_factor,
+                 contrast_upper_factor):
+        self._train_img_dir = train_img_dir
+        self._train_anns_file = train_anns_file
+
+        self._img_height = img_height
+        self._img_width = img_width
+        self._num_classes = num_classes
+        self._val_split = val_split
+        self._batch_size = batch_size
+
+        self._train_tfrecord_dir = train_tfrecord_dir
+        self._train_base_tfrecord_filename = train_base_tfrecord_filename
+        self._val_tfrecord_dir = val_tfrecord_dir
+        self._val_base_tfrecord_filename = val_base_tfrecord_filename
+        self._examples_per_tfrecord = examples_per_tfrecord
+
+        self._brightness_max_delta = brightness_max_delta
+        self._contrast_lower_factor = contrast_lower_factor
+        self._contrast_upper_factor = contrast_upper_factor
+
+        self._anns_dict = self.load_annotations()
+
+    @classmethod
+    def init_from_config(cls, config_path):
         with open(config_path) as f:
-            self._cfg = yaml.load(f)
+            cfg = yaml.load(f)
 
-    def rle_to_dense(self, rle, img_height, img_width):
-        '''Convert the rle representation of a single class mask to the equivalent dense binary np
-        array.
-        '''
-        if rle is None or rle == '':
-            return np.zeros((img_height, img_width), dtype=np.uint8)
-        rle_list = rle.strip().split(' ')
-        rle_pairs = [(int(rle_list[i]), int(rle_list[i+1])) for i in range(0, len(rle_list), 2)]
+        return cls(
+            train_img_dir=cfg['TRAIN_IMAGE_DIR'],
+            train_anns_file=cfg['TRAIN_ANNOTATIONS_FILE'],
+            img_height=cfg['IMG_HEIGHT'],
+            img_width=cfg['IMG_WIDTH'],
+            num_classes=cfg['NUM_CLASSES'],
+            val_split=cfg['VAL_SPLIT'],
+            batch_size=cfg['BATCH_SIZE'],
+            train_tfrecord_dir=cfg['TRAIN_TFRECORD_DIR'],
+            train_base_tfrecord_filename=cfg['TRAIN_BASE_TFRECORD_FILENAME'],
+            val_tfrecord_dir=cfg['VAL_TFRECORD_DIR'],
+            val_base_tfrecord_filename=cfg['VAL_BASE_TFRECORD_FILENAME'],
+            examples_per_tfrecord=cfg['EXAMPLES_PER_TFRECORD'],
+            brightness_max_delta=cfg['BRIGHTNESS_MAX_DELTA'],
+            contrast_lower_factor=cfg['CONTRAST_LOWER_FACTOR'],
+            contrast_upper_factor=cfg['CONTRAST_UPPER_FACTOR'], 
+        )
 
-        dense_1d_array = np.zeros(img_height * img_width, dtype=np.uint8)
-        for rle_start, rle_run in rle_pairs:
-            # Subtract 1 from indices because pixel indices start at 1 rather than 0
-            dense_1d_array[rle_start - 1:rle_start + rle_run - 1] = 1
-        
-        # Use Fortran ordering, meaning that the first index changes fastest (sort of unconventional)
-        dense_2d_array = np.reshape(dense_1d_array, (img_height, img_width), order='F')
-        return dense_2d_array
 
     def load_annotations(self):
-        '''Load all annotations from a file. Returns a dict mapping image filenames to annotations.
+        '''Load all annotations from a file.
+        Returns a dict mapping image filenames to annotations.
         '''
         anns = defaultdict(dict)
-        with open(self._cfg['TRAIN_ANNOTATIONS_FILE']) as f:
+        with open(self._train_anns_file) as f:
             for line in f:
                 file_name, rle_ann = line.split(',')
                 if file_name == 'ImageId_ClassId': # Skip header
@@ -51,38 +112,45 @@ class SeverstalSteelDataset():
         return anns
 
     def create_tfrecords(self):
-        anns = self.load_annotations()
-        anns_list = list(anns.items())
-        random.shuffle(anns_list)
+        imgs = list(self._anns_dict.keys())
+        random.shuffle(imgs)
 
-        num_train_examples = int(len(anns_list) * (1 - self._cfg['VAL_SPLIT']))
-        anns_train_list = anns_list[:num_train_examples]
-        anns_val_list = anns_list[num_train_examples:]
+        # Split train and test, and make sure that a multiple of BATCH_SIZE is stored in each set
+        num_train_examples = int(len(imgs) * (1 - self._val_split))
+        num_train_examples = num_train_examples - num_train_examples % self._batch_size
+        num_val_examples = len(imgs) - num_train_examples
+        num_val_examples = num_val_examples - num_val_examples % self._batch_size
+
+        train_imgs = imgs[:num_train_examples]
+        val_imgs = imgs[num_train_examples:num_train_examples+num_val_examples]
         print('Split train/validation data. '
-            f'Train: {len(anns_train_list)}, Val: {len(anns_val_list)}\n')
+            f'Train: {len(train_imgs)}, Val: {len(val_imgs)}\n')
 
         print('Creating train tfrecords...')
-        self._create_tfrecords_from_annotations(
-            img_dir=self._cfg['TRAIN_IMAGE_DIR'],
-            anns_list=anns_train_list,
-            output_dir=self._cfg['TRAIN_TFRECORD_DIR'],
-            base_tfrecord_filename=self._cfg['TRAIN_BASE_TFRECORD_FILENAME'],
-            examples_per_file=self._cfg['EXAMPLES_PER_TFRECORD']
+        self._create_tfrecords_from_img_list(
+            img_dir=self._train_img_dir,
+            img_list=train_imgs,
+            output_dir=self._train_tfrecord_dir,
+            base_tfrecord_filename=self._train_base_tfrecord_filename,
+            examples_per_file=self._examples_per_tfrecord
         )
 
         print('Creating validation tfrecords...')
-        self._create_tfrecords_from_annotations(
-            img_dir=self._cfg['TRAIN_IMAGE_DIR'],
-            anns_list=anns_val_list,
-            output_dir=self._cfg['VAL_TFRECORD_DIR'],
-            base_tfrecord_filename=self._cfg['VAL_BASE_TFRECORD_FILENAME'],
-            examples_per_file=self._cfg['EXAMPLES_PER_TFRECORD']
+        self._create_tfrecords_from_img_list(
+            img_dir=self._train_img_dir,
+            img_list=val_imgs,
+            output_dir=self._val_tfrecord_dir,
+            base_tfrecord_filename=self._val_base_tfrecord_filename,
+            examples_per_file=self._examples_per_tfrecord
         )
+    
+    def _get_img_list_file_path(self, tfrecord_dir, base_tfrecord_filename):
+        return os.path.join(tfrecord_dir, f'{base_tfrecord_filename}_images.json')
 
-    def _create_tfrecords_from_annotations(
+    def _create_tfrecords_from_img_list(
         self,
         img_dir,
-        anns_list,
+        img_list,
         output_dir,
         base_tfrecord_filename,
         examples_per_file):
@@ -91,29 +159,16 @@ class SeverstalSteelDataset():
 
         batch_start = 0
         file_index = 0
-        while batch_start < len(anns_list):
-            batch_end = min(batch_start + examples_per_file, len(anns_list))
-            file_path = os.path.join(output_dir, f'{base_tfrecord_filename}{file_index}.tfrecord')
-            print(f'Starting batch {batch_start}-{batch_end} out of {len(anns_list)}.')
+        while batch_start < len(img_list):
+            batch_end = min(batch_start + examples_per_file, len(img_list))
+            file_path = os.path.join(
+                output_dir, f'{base_tfrecord_filename}{batch_start}-{batch_end}.tfrecord')
+            print(f'Processing examples {batch_start}-{batch_end} out of {len(img_list)}.')
             print(f'Writing file {file_path}')
 
             with tf.io.TFRecordWriter(file_path) as writer:
                 for i in range(batch_start, batch_end):
-                    img_name, annotations_dict = anns_list[i]
-
-                    # Load image
-                    img_path = os.path.join(img_dir, img_name)
-                    img = np.array(Image.open(img_path))
-                    img_gray = img[:, :, 0] # All channels are the same
-
-                    # Load annotations
-                    dense_anns = []
-                    for cls in ['1', '2', '3', '4']:
-                        dense_ann = self.rle_to_dense(
-                            annotations_dict[cls], img_gray.shape[0], img_gray.shape[1])
-                        dense_anns.append(dense_ann)
-                    annotation_array = np.stack(dense_anns, axis=-1)
-                    annotation_array.astype(np.uint8)
+                    img_gray, annotation_array = self.get_example_from_img_name(img_list[i])
 
                     # Serialize example
                     assert img_gray.dtype == np.uint8
@@ -128,6 +183,9 @@ class SeverstalSteelDataset():
                     writer.write(example_proto.SerializeToString())
             batch_start = batch_end
             file_index += 1
+        summary_file_path = self._get_img_list_file_path(output_dir, base_tfrecord_filename)
+        with open(summary_file_path, 'w') as f:
+            json.dump(img_list, f)
 
     def _build_parse_fn(self):
         def _parse_example(proto):
@@ -154,45 +212,87 @@ class SeverstalSteelDataset():
             
             # Split img and ann, we only want to apply colour augmentations to img
             img, ann = tf.split(
-                combined_img_ann, num_or_size_splits=[1, self._cfg['NUM_CLASSES']], axis=-1)
-            
-            img = tf.image.random_brightness(img, max_delta=self._cfg['BRIGHTNESS_MAX_DELTA'])
+                combined_img_ann, num_or_size_splits=[1, self._num_classes], axis=-1)
+
+            img = tf.image.random_brightness(img, max_delta=self._brightness_max_delta)
             img = tf.image.random_contrast(
-                img, self._cfg['CONTRAST_LOWER_FACTOR'], self._cfg['CONTRAST_UPPER_FACTOR'])
+                img, self._contrast_lower_factor, self._contrast_upper_factor)
             return img, ann
         return _augment_example
 
     def _build_resize_fn(self):
         def _resize_example(img, ann):
-            img = tf.reshape(img,
-                [self._cfg['IMG_HEIGHT'], self._cfg['IMG_WIDTH'], 1])
-            ann = tf.reshape(ann,
-                [self._cfg['IMG_HEIGHT'], self._cfg['IMG_WIDTH'], self._cfg['NUM_CLASSES']])
+            img = tf.reshape(img, [self._img_height, self._img_width, 1])
+            ann = tf.reshape(ann, [self._img_height, self._img_width, self._num_classes])
             return img, ann
         return _resize_example
 
-    def create_dataset(self, training):
-        '''Create training dataset if training == True, else validation dataset.
+    def create_dataset(self, dataset_type):
+        '''Create tf dataset, where dataset_type is either 'training' or 'validation'
         '''
-        if training:
-            tfrecord_pattern = os.path.join(self._cfg['TRAIN_TFRECORD_DIR'], '*.tfrecord')
+        training = False
+        if dataset_type == 'training':
+            training = True
+            tfrecord_pattern = os.path.join(self._train_tfrecord_dir, '*.tfrecord')
+            img_list_file = self._get_img_list_file_path(
+                self._train_tfrecord_dir, self._train_base_tfrecord_filename)
+        elif dataset_type == 'validation':
+            tfrecord_pattern = os.path.join(self._val_tfrecord_dir, '*.tfrecord')
+            img_list_file = self._get_img_list_file_path(
+                self._val_tfrecord_dir, self._val_base_tfrecord_filename)
         else:
-            tfrecord_pattern = os.path.join(self._cfg['VAL_TFRECORD_DIR'], '*.tfrecord')
+            raise ValueError('Unsupported dataset_type.')
 
         tfrecord_files = glob.glob(tfrecord_pattern)
         tfrecord_files.sort()
 
-        #filenames = tf.placeholder(tf.string, shape=[None])
+        with open(img_list_file) as f:
+            img_list = json.load(f)
+        num_batches = len(img_list) / self._batch_size
+
         dataset = tf.data.TFRecordDataset(tfrecord_files)
-        
         dataset = dataset.map(self._build_parse_fn(), num_parallel_calls=6)
         dataset = dataset.map(self._build_resize_fn(), num_parallel_calls=6)
         if training:
             dataset = dataset.map(self._build_augment_fn(), num_parallel_calls=6)
-            dataset = dataset.shuffle(64)
-        dataset = dataset.batch(32)
+            dataset = dataset.shuffle(2 * self._batch_size)
+        dataset = dataset.repeat()
+        dataset = dataset.batch(self._batch_size)
         # Each training step consumes 1 element (i.e. 1 batch)
-        dataset = dataset.prefetch(buffer_size=1)
+        dataset = dataset.prefetch(buffer_size=3)
 
         #iterator = dataset.make_one_shot_iterator()
-        return dataset
+        return dataset, int(num_batches)
+
+    def get_image_list(self, dataset_type):
+        if dataset_type == 'training':
+            img_list_file = self._get_img_list_file_path(
+                self._train_tfrecord_dir, self._train_base_tfrecord_filename)
+        elif dataset_type == 'validation':
+            img_list_file = self._get_img_list_file_path(
+                self._val_tfrecord_dir, self._val_base_tfrecord_filename)
+        else:
+            raise ValueError('Unsupported dataset_type.')
+
+        with open(img_list_file) as f:
+            img_list = json.load(f)
+        return img_list
+
+    def get_example_from_img_name(self, img_name):
+        # Load image
+        img_path = os.path.join(self._train_img_dir, img_name)
+        img = np.array(Image.open(img_path))
+        img_gray = img[:, :, 0] # All channels are the same
+
+        # Load annotations
+        img_anns_dict = self._anns_dict.get(img_name, None)
+        if img_anns_dict is None:
+            return img_gray, None # Test example, no annotations
+        dense_anns = []
+        for cls in ['1', '2', '3', '4']:
+            dense_ann = rle_to_dense(
+                img_anns_dict[cls], img_gray.shape[0], img_gray.shape[1])
+            dense_anns.append(dense_ann)
+        annotation_array = np.stack(dense_anns, axis=-1)
+        annotation_array.astype(np.uint8)
+        return img_gray, annotation_array

@@ -9,5 +9,5 @@ if __name__ == '__main__':
     parser.add_argument('--config', required=True, help='Path to .yaml config file.')
     args = parser.parse_args()
 
-    dataset = SeverstalSteelDataset(args.config)
+    dataset = SeverstalSteelDataset.init_from_config(args.config)
     dataset.create_tfrecords()
