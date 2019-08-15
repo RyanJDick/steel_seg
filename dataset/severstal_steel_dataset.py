@@ -282,7 +282,7 @@ class SeverstalSteelDataset():
         # Load image
         img_path = os.path.join(self._train_img_dir, img_name)
         img = np.array(Image.open(img_path))
-        img_gray = img[:, :, 0] # All channels are the same
+        img_gray = img[:, :, :1] # All channels are the same
 
         # Load annotations
         img_anns_dict = self._anns_dict.get(img_name, None)
