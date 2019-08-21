@@ -7,6 +7,7 @@ from datetime import datetime
 import yaml
 import json
 import numpy as np
+import cv2
 import tensorflow as tf
 from PIL import Image
 
@@ -32,6 +33,22 @@ def rle_to_dense(rle, img_height, img_width):
     # Use Fortran ordering, meaning that the first index changes fastest (sort of unconventional)
     dense_2d_array = np.reshape(dense_1d_array, (img_height, img_width), order='F')
     return dense_2d_array
+
+
+def visualize_segmentations(img, anns):
+    vis_img = img.copy()
+    
+    colours = [[0, 235, 235], [0, 210, 0], [0, 0, 255], [255, 0, 255]]
+    for i in range(4):
+        mask = anns[:, :, i]
+        if np.any(mask):
+            print(f'Class {i}')
+        kernel = np.ones((10, 10), np.uint8) 
+        dilated_mask = cv2.dilate(mask, kernel, iterations=1)
+        contour_mask = dilated_mask - mask
+        for c in range(3):
+            vis_img[contour_mask == 1, c] = colours[i][c]
+    return vis_img
 
 
 class SeverstalSteelDataset():
