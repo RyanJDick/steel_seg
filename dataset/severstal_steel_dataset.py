@@ -34,6 +34,17 @@ def rle_to_dense(rle, img_height, img_width):
     dense_2d_array = np.reshape(dense_1d_array, (img_height, img_width), order='F')
     return dense_2d_array
 
+def dense_to_rle(dense):
+    '''Convert the dense np ndarray representation of a single class mask to the equivalent rle
+    representation.
+    '''
+    assert len(dense.shape) == 2
+    # Use Fortran (column-major) ordering
+    pixels = dense.flatten(order='F')
+    pixels = np.concatenate([[0], pixels, [0]])
+    runs = np.where(pixels[1:] != pixels[:-1])[0] + 1
+    runs[1::2] -= runs[::2]
+    return ' '.join(str(x) for x in runs)
 
 def visualize_segmentations(img, anns):
     vis_img = img.copy()
@@ -231,9 +242,9 @@ class SeverstalSteelDataset():
             img, ann = tf.split(
                 combined_img_ann, num_or_size_splits=[1, self._num_classes], axis=-1)
 
-            img = tf.image.random_brightness(img, max_delta=self._brightness_max_delta)
-            img = tf.image.random_contrast(
-                img, self._contrast_lower_factor, self._contrast_upper_factor)
+            #img = tf.image.random_brightness(img, max_delta=self._brightness_max_delta)
+            #img = tf.image.random_contrast(
+            #    img, self._contrast_lower_factor, self._contrast_upper_factor)
             return img, ann
         return _augment_example
 
