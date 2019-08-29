@@ -8,8 +8,8 @@ import skopt
 import tensorflow as tf
 from tensorflow.keras import backend as K
 
-from dataset.severstal_steel_dataset import SeverstalSteelDataset
-from model.unet import build_unet_model
+from steel_seg.dataset.severstal_steel_dataset import SeverstalSteelDataset
+from steel_seg.model.unet import build_unet_model
 
 
 def jaccard_distance_loss(y_true, y_pred, smooth=100):
