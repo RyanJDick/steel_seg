@@ -7,8 +7,8 @@ def build_deep_q_model(img_height,
                        activation=tf.keras.activations.elu,
                        kernel_initializer='he_normal',
                        kernel_size=(3, 3),
-                       pool_size=(2, 2),
-                       num_features=[4, 4, 4],
+                       pool_size=(2, 4),
+                       num_features=[4, 8, 16],
                        drop_prob=0.5):
     assert len(num_features) == num_layers
 
