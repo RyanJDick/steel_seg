@@ -1,5 +1,20 @@
+import numpy as np
 import tensorflow as tf
 
+
+def onehottify(x, n=None, dtype=float):
+    '''1-hot encode x with the max value n (computed from data if n is None).
+    '''
+    x = np.asarray(x)
+    n = np.max(x) + 1 if n is None else n
+    return np.eye(n, dtype=dtype)[x]
+
+def postprocess(y, thresh):
+    '''Only allow one class at each pixel'''
+    y_argmax = np.argmax(y, axis=-1)
+    y_one_hot = onehottify(y_argmax, y.shape[-1])
+    y_one_hot[y < thresh] = 0
+    return y_one_hot
 
 def build_unet_model(img_height,
                      img_width,

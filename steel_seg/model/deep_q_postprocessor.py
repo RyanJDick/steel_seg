@@ -12,8 +12,10 @@ def build_deep_q_model(img_height,
                        drop_prob=0.5):
     assert len(num_features) == num_layers
 
-    inputs = tf.keras.Input(shape=(img_height, img_width, num_classes))
-    x = inputs
+    inputs = tf.keras.Input(shape=(img_height, img_width, 1))
+    #x = inputs
+    # Convert to float format
+    x = tf.keras.layers.Lambda(lambda x: x / 255)(inputs)
 
     for layer_idx in range(num_layers):
         x = tf.keras.layers.Conv2D(num_features[layer_idx],
@@ -31,8 +33,9 @@ def build_deep_q_model(img_height,
             x = tf.keras.layers.MaxPooling2D(pool_size)(x)
 
     x = tf.keras.layers.Flatten()(x)
-    class_outputs = [tf.keras.layers.Dense(2, activation=tf.keras.activations.sigmoid)(x) for _ in range(num_classes)]
-    outputs = tf.stack(class_outputs, axis=1) # output shape: (batch, class, 2)
+    #class_outputs = [tf.keras.layers.Dense(2, activation=tf.keras.activations.sigmoid)(x) for _ in range(num_classes)]
+    #outputs = tf.stack(class_outputs, axis=1) # output shape: (batch, class, 2)
+    outputs = tf.keras.layers.Dense(4, activation=tf.keras.activations.softmax)(x)
 
     model = tf.keras.Model(inputs=[inputs], outputs=[outputs])
     return model

@@ -9,7 +9,8 @@ import tensorflow as tf
 from tensorflow.keras import backend as K
 
 from steel_seg.dataset.severstal_steel_dataset import SeverstalSteelDataset
-from steel_seg.model.unet import build_unet_model
+from steel_seg.model.unet import build_unet_model, postprocess
+from steel_seg.utils import dice_coeff_kaggle
 
 
 def jaccard_distance_loss(y_true, y_pred, smooth=100):
@@ -77,6 +78,28 @@ def dice_coef_loss(y_true, y_pred):
     intersection = K.sum(y_true_f * y_pred_f)
     return 1 - (2. * intersection + smooth) / (K.sum(y_true_f) + K.sum(y_pred_f) + smooth)
 
+def empty_mask_loss(from_logits=False):
+    def _empty_mask_loss(y_true, y_pred):
+        '''Converts y_true to a binary value for each class (mask or no mask), and then applies
+        cross-entropy loss.
+        '''
+        # Assumes y_true has shape (N, H, W, C)
+        y_true_mask_exists = tf.reduce_max(y_true, axis=(1, 2))
+        if not from_logits:
+            # When softmax activation function is used for output operation, we
+            # use logits from the softmax function directly to compute loss in order
+            # to prevent collapsing zero when training.
+            assert len(y_pred.op.inputs) == 1
+            y_pred = y_pred.op.inputs[0]
+        return tf.nn.softmax_cross_entropy_with_logits_v2(y_true_mask_exists, y_pred)
+
+    return _empty_mask_loss
+
+def empty_mask_accuracy(y_true, y_pred):
+    # Assumes y_true has shape (N, H, W, C)
+    y_true_mask_exists = tf.reduce_max(y_true, axis=(1, 2))
+    return tf.keras.metrics.binary_accuracy(y_true_mask_exists, y_pred)
+
 def weighted_binary_crossentropy(beta, from_logits=False):
     def _weighted_binary_crossentropy(target, output):
         if not from_logits:
@@ -110,29 +133,8 @@ def class_weighted_binary_crossentropy(cls_weights, from_logits=False):
         return sum(cls_cross_entropy_losses)
     return _class_weighted_binary_crossentropy
 
-def dice_coeff_kaggle(y_pred, y_true):
-    '''Dice Coefficient metric as defined in the Kaggle competition.
-    '''
-    y_pred = np.where(y_pred > 0.5, 1, 0)
-    
-    dice_scores = []
-    for i in range(y_pred.shape[-1]):
-        y_pred_sum = np.sum(y_pred[:, :, i])
-        y_true_sum = np.sum(y_true[:, :, i])
-        if y_pred_sum == 0 and y_true_sum == 0:
-            dice_scores.append(1.0)
-            continue
-        intersection = np.sum(y_pred[:, :, i] * y_true[:, :, i])
-        dice_scores.append(
-            2 * intersection / (y_pred_sum + y_true_sum))
-    return np.mean(dice_scores)
 
-def onehottify(x, n=None, dtype=float):
-    '''1-hot encode x with the max value n (computed from data if n is None).
-    '''
-    x = np.asarray(x)
-    n = np.max(x) + 1 if n is None else n
-    return np.eye(n, dtype=dtype)[x]
+
 
 
 def eval(model, dataset, img_list, threshold=0.5):
@@ -141,11 +143,7 @@ def eval(model, dataset, img_list, threshold=0.5):
         img, ann = dataset.get_example_from_img_name(img_name)
         img_batch = np.expand_dims(img, axis=0)
         y = model.predict(img_batch)
-
-        # Only allow one class at each pixel
-        y_argmax = np.argmax(y, axis=-1)
-        y_one_hot = onehottify(y_argmax, 4)
-        y_one_hot[y < threshold] = 0
+        y_one_hot = postprocess(y, threshold)
         dice_coeffs.append(dice_coeff_kaggle(y_one_hot[0, :, :, :], ann))
     mean_dice_coeff = np.mean(dice_coeffs)
     print(f'Mean dice coeff: {mean_dice_coeff}')

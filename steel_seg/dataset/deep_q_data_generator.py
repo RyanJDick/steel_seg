@@ -1,8 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
-from steel_seg.train import dice_coeff_kaggle
-from steel_seg.dataset.severstal_steel_dataset import rle_to_dense, dense_to_rle
+from steel_seg.utils import dice_coeff_kaggle, rle_to_dense, dense_to_rle
 
 
 def onehottify(x, n=None, dtype=float):
