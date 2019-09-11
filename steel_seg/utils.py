@@ -68,3 +68,11 @@ def visualize_segmentations(img, anns):
         for c in range(3):
             vis_img[contour_mask == 1, c] = colours[i][c]
     return vis_img
+
+
+def onehottify(x, n=None, dtype=float):
+    '''1-hot encode x with the max value n (computed from data if n is None).
+    '''
+    x = np.asarray(x)
+    n = np.max(x) + 1 if n is None else n
+    return np.eye(n, dtype=dtype)[x]

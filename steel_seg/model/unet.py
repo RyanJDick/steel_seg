@@ -1,13 +1,8 @@
 import numpy as np
 import tensorflow as tf
 
+from steel_seg.utils import onehottify
 
-def onehottify(x, n=None, dtype=float):
-    '''1-hot encode x with the max value n (computed from data if n is None).
-    '''
-    x = np.asarray(x)
-    n = np.max(x) + 1 if n is None else n
-    return np.eye(n, dtype=dtype)[x]
 
 def postprocess(y, thresh):
     '''Only allow one class at each pixel'''

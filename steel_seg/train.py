@@ -78,28 +78,6 @@ def dice_coef_loss(y_true, y_pred):
     intersection = K.sum(y_true_f * y_pred_f)
     return 1 - (2. * intersection + smooth) / (K.sum(y_true_f) + K.sum(y_pred_f) + smooth)
 
-def empty_mask_loss(from_logits=False):
-    def _empty_mask_loss(y_true, y_pred):
-        '''Converts y_true to a binary value for each class (mask or no mask), and then applies
-        cross-entropy loss.
-        '''
-        # Assumes y_true has shape (N, H, W, C)
-        y_true_mask_exists = tf.reduce_max(y_true, axis=(1, 2))
-        if not from_logits:
-            # When softmax activation function is used for output operation, we
-            # use logits from the softmax function directly to compute loss in order
-            # to prevent collapsing zero when training.
-            assert len(y_pred.op.inputs) == 1
-            y_pred = y_pred.op.inputs[0]
-        return tf.nn.softmax_cross_entropy_with_logits_v2(y_true_mask_exists, y_pred)
-
-    return _empty_mask_loss
-
-def empty_mask_accuracy(y_true, y_pred):
-    # Assumes y_true has shape (N, H, W, C)
-    y_true_mask_exists = tf.reduce_max(y_true, axis=(1, 2))
-    return tf.keras.metrics.binary_accuracy(y_true_mask_exists, y_pred)
-
 def weighted_binary_crossentropy(beta, from_logits=False):
     def _weighted_binary_crossentropy(target, output):
         if not from_logits:
