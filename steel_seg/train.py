@@ -111,9 +111,27 @@ def class_weighted_binary_crossentropy(cls_weights, from_logits=False):
         return sum(cls_cross_entropy_losses)
     return _class_weighted_binary_crossentropy
 
+def pixel_map_weighted_binary_crossentropy(cls_weights, from_logits=False):
+    def _pixel_map_weighted_binary_crossentropy(target, output):
+        if not from_logits:
+            # When sigmoid activation function is used for output operation, we
+            # use logits from the sigmoid function directly to compute loss in order
+            # to prevent collapsing zero when training.
+            assert len(output.op.inputs) == 1
+            output = output.op.inputs[0]
 
+        class_weights = tf.constant(np.array(cls_weights, dtype=np.float32))
 
+        weight_map = tf.multiply(target, class_weights) # Multiply class weights at every pixel
+        weight_map = tf.reduce_sum(weight_map, axis=-1, keepdims=True) # Sum weights pixelwise
+        weight_map += 1.0
 
+        loss_map = tf.nn.sigmoid_cross_entropy_with_logits(labels=target, logits=output)
+        weighted_loss = tf.multiply(loss_map, weight_map)
+
+        loss = tf.reduce_mean(weighted_loss)
+        return loss
+    return _pixel_map_weighted_binary_crossentropy
 
 def eval(model, dataset, img_list, threshold=0.5):
     dice_coeffs = []
