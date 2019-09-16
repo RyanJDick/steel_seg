@@ -50,27 +50,113 @@ def focal_loss(alpha=0.25, gamma=2):
 
     return loss
 
+def dice_coef_channel_helper(y_true, y_pred):
+    '''Helper funtion used by dice metrics to compute the dice score for a single image and class.
+    '''
+    y_true_b = K.flatten(y_true) > 0.5
+    y_pred_b = K.flatten(y_pred) > 0.5
+    y_true_f = tf.to_float(y_true_b)
+    y_pred_f = tf.to_float(y_pred_b)
+    y_true_i = tf.to_int32(y_true_b)
+    y_pred_i = tf.to_int32(y_pred_b)
+
+    def empty():
+        return 1.0
+
+    def not_empty():
+        intersection = K.sum(y_true_f * y_pred_f)
+        return (2. * intersection) / (K.sum(y_true_f) + K.sum(y_pred_f))
+
+    y_true_and_y_pred_empty = tf.equal(K.sum(y_true_f) + K.sum(y_pred_f), 0)
+    return tf.cond(y_true_and_y_pred_empty, empty, not_empty)
+
 def dice_coef(batch_size, num_classes=4):
     def _dice_coef(y_true, y_pred):
-        def dice_coef_channel_helper(y_true, y_pred):
-            y_true_f = tf.to_float(K.flatten(y_true) > 0.5)
-            y_pred_f = tf.to_float(K.flatten(y_pred) > 0.5)
-            def empty():
-                return 1.0
-            def not_empty():
-                intersection = K.sum(y_true_f * y_pred_f)
-                return (2. * intersection) / (K.sum(y_true_f) + K.sum(y_pred_f))
-            y_true_and_y_pred_empty = tf.equal(K.sum(y_true_f) + K.sum(y_pred_f), 0)
-            return tf.cond(y_true_and_y_pred_empty, empty, not_empty)
-
-
         batch_scores = []
         for b in range(batch_size):
             for i in range(num_classes):
-                batch_scores.append(dice_coef_channel_helper(y_true[b, :, :, i], y_pred[b, :, :, i]))
-        return tf.add_n(batch_scores) / batch_size
+                dice_score = dice_coef_channel_helper(y_true[b, :, :, i], y_pred[b, :, :, i])
+                batch_scores.append(dice_score)
+        return tf.add_n(batch_scores) / (batch_size * num_classes)
     return _dice_coef
 
+
+# class DiceCoefByClassAndEmptiness(tf.keras.metrics.Metric):
+#     def __init__(
+#         self,
+#         cls_id,
+#         empty_masks_only,
+#         batch_size,
+#         name='dice_coef_by_class_and_emptiness',
+#         **kwargs
+#     ):
+#         super(DiceCoefByClassAndEmptiness, self).__init__(name=name, **kwargs)
+#         self.cls_id = cls_id
+#         self.empty_masks_only = empty_masks_only
+#         self.batch_size = batch_size
+#         self.dice_score_sum = self.add_weight(name='dice_score_sum', initializer='zeros')
+#         self.dice_score_count = self.add_weight(name='dice_score_count', initializer='zeros')
+
+#     def update_state(self, y_true, y_pred, sample_weight=None):
+#         if sample_weight is not None:
+#             raise NotImplementedError("sample_weight not supported by DiceCoefOnEmptyByClass")
+#         sample_scores = []
+#         sample_weights = []
+#         for b in range(self.batch_size):
+#             dice_score = dice_coef_channel_helper(
+#                 y_true[b, :, :, self.cls_id],
+#                 y_pred[b, :, :, self.cls_id])
+
+#             def on_gt_empty():
+#                 if self.empty_masks_only:
+#                     self.dice_score_sum.assign_add(tf.add_n(batch_scores))
+#                     self.dice_score_count.assign_add(len(batch_scores))
+
+#             def on_gt_not_empty():
+#                 if not self.empty_masks_only:
+#                     self.dice_score_sum.assign_add(tf.add_n(batch_scores))
+#                     self.dice_score_count.assign_add(len(batch_scores))
+
+#             tf.cond(gt_is_empty, on_gt_empty, on_gt_not_empty)
+
+#     def result(self):
+#         return self.dice_score_sum / self.dice_score_count
+
+class DiceCoefByClassAndEmptiness(tf.keras.metrics.Mean):
+    '''
+    '''
+    def __init__(self,
+        cls_id,
+        empty_masks_only,
+        batch_size,
+        name='dice_coef_by_class_and_emptiness',
+        **kwargs
+    ):
+        super(DiceCoefByClassAndEmptiness, self).__init__(name=name, **kwargs)
+        self.cls_id = cls_id
+        self.empty_masks_only = empty_masks_only
+        self.batch_size = batch_size
+
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        if sample_weight is not None:
+            raise ValueError("sample_weight not supported by DiceCoefByClassAndEmptiness")
+
+        sample_scores = []
+        for b in range(self.batch_size):
+            sample_scores.append(
+                dice_coef_channel_helper(
+                    y_true[b, :, :, self.cls_id],
+                    y_pred[b, :, :, self.cls_id])
+            )
+        sample_scores = tf.stack(sample_scores)
+
+        y_true_counts = tf.math.reduce_sum(y_true[:, :, :, self.cls_id], axis=[1, 2])
+        sample_weights = tf.clip_by_value(y_true_counts, 0.0, 1.0) # Clip counts greater than 0 to 1.0
+        if self.empty_masks_only:
+            sample_weights = sample_weights * -1.0 + 1.0 # Flip 0.0 and 1.0 values
+
+        return super(DiceCoefByClassAndEmptiness, self).update_state(
+            sample_scores, sample_weight=sample_weights)
 
 def dice_coef_loss(y_true, y_pred):
     y_true_f = K.flatten(y_true)
