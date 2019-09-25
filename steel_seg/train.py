@@ -219,6 +219,40 @@ def pixel_map_weighted_binary_crossentropy(cls_weights, from_logits=False):
         return loss
     return _pixel_map_weighted_binary_crossentropy
 
+def class_weighted_binary_classification_crossentropy(cls_weights, from_logits=False):
+    '''Loss function used by binary mask classifier (NOT dense segmentation)
+    '''
+    def _class_weighted_binary_classification_crossentropy(target, output):
+        if not from_logits:
+            # When sigmoid activation function is used for output operation, we
+            # use logits from the sigmoid function directly to compute loss in order
+            # to prevent collapsing zero when training.
+            assert len(output.op.inputs) == 1
+            output = output.op.inputs[0]
+        class_weights = tf.constant(np.array(cls_weights, dtype=np.float32))
+
+        losses = tf.nn.sigmoid_cross_entropy_with_logits(labels=target, logits=output)
+        weighted_losses = tf.multiply(losses, class_weights)
+        loss = tf.reduce_mean(weighted_losses)
+        return loss
+    return _class_weighted_binary_classification_crossentropy
+
+def binary_accuracy_by_class(cls_id, threshold=0.5):
+    def _binary_accuracy_by_class(y_true, y_pred):
+        y_true = y_true[:, cls_id]
+        y_pred = y_pred[:, cls_id]
+
+        y_true = tf.to_int32(y_true)
+        y_pred = tf.to_int32(y_pred > threshold)
+
+        total = tf.shape(y_true)[0]
+        correct = tf.reduce_sum(tf.to_int32(tf.math.equal(y_pred, y_true)))
+
+        return tf.math.divide(correct, total)
+    fn = _binary_accuracy_by_class
+    fn.__name__ += f'_{cls_id}' # Hack to get the cls_id in the metric name
+    return fn
+
 def eval(model, dataset, img_list, threshold=0.5):
     dice_coeffs = []
     for img_name in img_list:
