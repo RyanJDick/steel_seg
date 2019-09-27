@@ -164,6 +164,14 @@ def dice_coef_loss(y_true, y_pred):
     intersection = K.sum(y_true_f * y_pred_f)
     return 1 - (2. * intersection + smooth) / (K.sum(y_true_f) + K.sum(y_pred_f) + smooth)
 
+def dice_loss_multi_class(y_true, y_pred):
+    smooth = 0.0001
+    numerator = 2 * tf.reduce_sum(y_true * y_pred, axis=(1,2)) + smooth
+    denominator = tf.reduce_sum(y_true + y_pred, axis=(1,2)) + smooth
+
+    per_channel_dice_loss = 1 - numerator / denominator
+    return tf.reduce_mean(per_channel_dice_loss)
+
 def weighted_binary_crossentropy(beta, from_logits=False):
     def _weighted_binary_crossentropy(target, output):
         if not from_logits:
@@ -232,7 +240,9 @@ def class_weighted_binary_classification_crossentropy(cls_weights, from_logits=F
         class_weights = tf.constant(np.array(cls_weights, dtype=np.float32))
 
         losses = tf.nn.sigmoid_cross_entropy_with_logits(labels=target, logits=output)
-        weighted_losses = tf.multiply(losses, class_weights)
+        loss_weights = tf.multiply(target, class_weights) # Weight the positive examples, not the negatives ones
+        loss_weights += 1.0
+        weighted_losses = tf.multiply(losses, loss_weights)
         loss = tf.reduce_mean(weighted_losses)
         return loss
     return _class_weighted_binary_classification_crossentropy
