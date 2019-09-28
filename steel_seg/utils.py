@@ -5,8 +5,12 @@ import cv2
 def dice_coeff_kaggle(y_pred, y_true):
     '''Dice Coefficient metric as defined in the Kaggle competition.
     '''
+    dice_scores = per_class_dice_coeff(y_pred, y_true)
+    return np.mean(dice_scores)
+
+def per_class_dice_coeff(y_pred, y_true):
     y_pred = np.where(y_pred > 0.5, 1, 0)
-    
+
     dice_scores = []
     for i in range(y_pred.shape[-1]):
         y_pred_sum = np.sum(y_pred[:, :, i])
@@ -17,7 +21,7 @@ def dice_coeff_kaggle(y_pred, y_true):
         intersection = np.sum(y_pred[:, :, i] * y_true[:, :, i])
         dice_scores.append(
             2 * intersection / (y_pred_sum + y_true_sum))
-    return np.mean(dice_scores)
+    return np.array(dice_scores)
 
 
 def rle_to_dense(rle, img_height, img_width):
