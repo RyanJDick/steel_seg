@@ -56,7 +56,9 @@ class SeverstalSteelDataset():
                  examples_per_tfrecord,
                  brightness_max_delta,
                  contrast_lower_factor,
-                 contrast_upper_factor):
+                 contrast_upper_factor,
+                 patch_size,
+                 num_patches_per_image):
         self._train_img_dir = train_img_dir
         self._train_anns_file = train_anns_file
 
@@ -75,6 +77,9 @@ class SeverstalSteelDataset():
         self._brightness_max_delta = brightness_max_delta
         self._contrast_lower_factor = contrast_lower_factor
         self._contrast_upper_factor = contrast_upper_factor
+
+        self._patch_size = patch_size
+        self._num_patches_per_image = num_patches_per_image
 
         self._anns_dict = load_annotations(self._train_anns_file)
 
@@ -99,6 +104,8 @@ class SeverstalSteelDataset():
             brightness_max_delta=cfg['BRIGHTNESS_MAX_DELTA'],
             contrast_lower_factor=cfg['CONTRAST_LOWER_FACTOR'],
             contrast_upper_factor=cfg['CONTRAST_UPPER_FACTOR'],
+            patch_size=cfg['PATCH_SIZE'],
+            num_patches_per_image=cfg['NUM_PATCHES_PER_IMAGE'],
         )
 
     def create_tfrecords(self):
@@ -207,12 +214,12 @@ class SeverstalSteelDataset():
             return img, ann
         return _augment_example
 
-    def _build_resize_fn(self):
-        def _resize_example(img, ann):
+    def _build_reshape_fn(self):
+        def _reshape_example(img, ann):
             img = tf.reshape(img, [self._img_height, self._img_width, 1])
             ann = tf.reshape(ann, [self._img_height, self._img_width, self._num_classes])
             return img, ann
-        return _resize_example
+        return _reshape_example
 
     def _build_convert_to_classification_fn(self):
         def _convert_to_classification_example(img, ann):
@@ -221,7 +228,40 @@ class SeverstalSteelDataset():
             return img, ann
         return _convert_to_classification_example
 
-    def create_dataset(self, dataset_type, dense_segmentation=True):
+    def _build_sample_patches_fn(self, num_patches=4, patch_size=256):
+        def _sample_patches(img, ann):
+            img_channels = tf.shape(img)[-1]
+            ann_channels = tf.shape(ann)[-1]
+            combined = tf.concat([img, ann], axis=-1)
+            combined_channels = img_channels + ann_channels
+            img_patches = []
+            ann_patches = []
+            for _ in range(num_patches):
+                patch = tf.random_crop(combined, [patch_size, patch_size, combined_channels])
+                img_patches.append(patch[:, :, :img_channels])
+                ann_patches.append(patch[:, :, img_channels:])
+
+            img_patches = tf.stack(img_patches)
+            ann_patches = tf.stack(ann_patches)
+
+            return img_patches, ann_patches
+        return _sample_patches
+
+    def _build_deterministic_patches_fn(self, patch_size, img_width, img_height):
+        def _select_patches(img, ann):
+            img_patches = []
+            ann_patches = []
+            for start_row in range(0, img_height - patch_size + 1, patch_size):
+                for start_col in range(0, img_width - patch_size + 1, patch_size):
+                    img_patches.append(img[start_row:start_row+patch_size, start_col:start_col+patch_size, :])
+                    ann_patches.append(ann[start_row:start_row+patch_size, start_col:start_col+patch_size, :])
+
+            img_patches = tf.stack(img_patches)
+            ann_patches = tf.stack(ann_patches)
+            return img_patches, ann_patches
+        return _select_patches
+
+    def create_dataset(self, dataset_type, use_patches=False, dense_segmentation=True):
         '''Create tf dataset, where dataset_type is either 'training' or 'validation'
         '''
         training = False
@@ -244,14 +284,27 @@ class SeverstalSteelDataset():
             img_list = json.load(f)
         num_batches = len(img_list) / self._batch_size
 
+        num_parallel_calls = 6
         dataset = tf.data.TFRecordDataset(tfrecord_files)
-        dataset = dataset.map(self._build_parse_fn(), num_parallel_calls=6)
-        dataset = dataset.map(self._build_resize_fn(), num_parallel_calls=6)
+        dataset = dataset.map(self._build_parse_fn(), num_parallel_calls=num_parallel_calls)
+        dataset = dataset.map(self._build_reshape_fn(), num_parallel_calls=num_parallel_calls)
+        if use_patches:
+            if training:
+                dataset = dataset.map(
+                    self._build_sample_patches_fn(num_patches=self._num_patches_per_image, patch_size=self._patch_size),
+                    num_parallel_calls=num_parallel_calls)
+            else:
+                dataset = dataset.map(
+                    self._build_deterministic_patches_fn(self._patch_size, self._img_width, self._img_height),
+                    num_parallel_calls=num_parallel_calls)
+            dataset = dataset.apply(tf.data.experimental.unbatch())
         if training:
-            dataset = dataset.map(self._build_augment_fn(), num_parallel_calls=6)
+            dataset = dataset.map(self._build_augment_fn(), num_parallel_calls=num_parallel_calls)
             dataset = dataset.shuffle(2 * self._batch_size)
         if not dense_segmentation:
-            dataset = dataset.map(self._build_convert_to_classification_fn(), num_parallel_calls=6)
+            dataset = dataset.map(
+                self._build_convert_to_classification_fn(),
+                num_parallel_calls=num_parallel_calls)
         dataset = dataset.repeat()
         dataset = dataset.batch(self._batch_size)
         # Each training step consumes 1 element (i.e. 1 batch)
@@ -449,12 +502,12 @@ class SeverstalSteelPostprocessDataset():
             return seg, true_scores
         return _parse_example
 
-    def _build_resize_fn(self):
-        def _resize_example(seg, true_scores):
+    def _build_reshape_fn(self):
+        def _reshape_example(seg, true_scores):
             seg = tf.reshape(seg, [self._img_height, self._img_width, self._num_classes])
             true_scores = tf.reshape(true_scores, [self._num_classes, 2])
             return seg, true_scores
-        return _resize_example
+        return _reshape_example
 
     def create_dataset(self, dataset_type):
         '''Create tf dataset, where dataset_type is either 'training' or 'validation'
@@ -481,7 +534,7 @@ class SeverstalSteelPostprocessDataset():
 
         dataset = tf.data.TFRecordDataset(tfrecord_files)
         dataset = dataset.map(self._build_parse_fn(), num_parallel_calls=6)
-        dataset = dataset.map(self._build_resize_fn(), num_parallel_calls=6)
+        dataset = dataset.map(self._build_reshape_fn(), num_parallel_calls=6)
         if training:
             dataset = dataset.shuffle(2 * self._batch_size)
         dataset = dataset.repeat()

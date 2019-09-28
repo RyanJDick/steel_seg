@@ -23,7 +23,11 @@ EXAMPLES_PER_TFRECORD: 2000
 BRIGHTNESS_MAX_DELTA: 0.3 #0.3
 CONTRAST_LOWER_FACTOR: 0.8 #0.8
 CONTRAST_UPPER_FACTOR: 1.2 #1.2
-BATCH_SIZE: 4
+BATCH_SIZE: 8
+
+# Patches
+PATCH_SIZE: 256 # Same as image height
+NUM_PATCHES_PER_IMAGE: 4
 
 
 ############################################

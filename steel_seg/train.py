@@ -166,10 +166,12 @@ def dice_coef_loss(y_true, y_pred):
 
 def dice_loss_multi_class(y_true, y_pred):
     smooth = 0.0001
-    numerator = 2 * tf.reduce_sum(y_true * y_pred, axis=(1,2)) + smooth
+    numerator_weight = 10
+    numerator = numerator_weight * 2 * tf.reduce_sum(y_true * y_pred, axis=(1,2)) + smooth
     denominator = tf.reduce_sum(y_true + y_pred, axis=(1,2)) + smooth
 
-    per_channel_dice_loss = 1 - numerator / denominator
+    # Was 1 - dice_coeff, but made it numerator_weight - dice_coeff to keep the loss positive
+    per_channel_dice_loss = numerator_weight - numerator / denominator
     return tf.reduce_mean(per_channel_dice_loss)
 
 def weighted_binary_crossentropy(beta, from_logits=False):
