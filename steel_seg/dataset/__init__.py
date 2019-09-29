@@ -1,1 +1,2 @@
 from .severstal_steel_dataset import SeverstalSteelDataset, SeverstalSteelPostprocessDataset
+from .severstal_steel_dataset_patch_generator import SeverstalSteelDatasetPatchGenerator

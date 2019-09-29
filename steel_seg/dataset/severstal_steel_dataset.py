@@ -88,6 +88,8 @@ class SeverstalSteelDataset():
         with open(config_path) as f:
             cfg = yaml.load(f)
 
+        print('Warning!!! Sort out the num_patches.')
+
         return cls(
             train_img_dir=cfg['TRAIN_IMAGE_DIR'],
             train_anns_file=cfg['TRAIN_ANNOTATIONS_FILE'],
@@ -105,7 +107,7 @@ class SeverstalSteelDataset():
             contrast_lower_factor=cfg['CONTRAST_LOWER_FACTOR'],
             contrast_upper_factor=cfg['CONTRAST_UPPER_FACTOR'],
             patch_size=cfg['PATCH_SIZE'],
-            num_patches_per_image=cfg['NUM_PATCHES_PER_IMAGE'],
+            num_patches_per_image=cfg['NUM_PATCHES_PER_IMAGE_TRAIN'],
         )
 
     def create_tfrecords(self):
@@ -208,9 +210,9 @@ class SeverstalSteelDataset():
             img, ann = tf.split(
                 combined_img_ann, num_or_size_splits=[1, self._num_classes], axis=-1)
 
-            #img = tf.image.random_brightness(img, max_delta=self._brightness_max_delta)
-            #img = tf.image.random_contrast(
-            #    img, self._contrast_lower_factor, self._contrast_upper_factor)
+            img = tf.image.random_brightness(img, max_delta=self._brightness_max_delta)
+            img = tf.image.random_contrast(
+                img, self._contrast_lower_factor, self._contrast_upper_factor)
             return img, ann
         return _augment_example
 
