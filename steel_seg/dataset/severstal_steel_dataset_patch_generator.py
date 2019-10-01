@@ -11,6 +11,15 @@ from steel_seg.utils import rle_to_dense, dense_to_rle
 from steel_seg.image_augmentation import adjust_brightness_and_contrast
 
 
+def get_image_patches(img, patch_size, num_patches_per_image):
+    # TODO: only supports changing x position
+    h, w, _ = img.shape
+    x_step_size = int((w - patch_size) / (num_patches_per_image - 1))
+    img_patches = []
+    for x in range(0, w - patch_size + 1, x_step_size):
+        img_patches.append(img[0:patch_size, x:x+patch_size])
+    return img_patches, x_step_size
+
 class SeverstalSteelDatasetPatchGenerator(tf.keras.utils.Sequence):
     '''Dataset generator that generates patches of Severstal Steel images.
     This is slower than the SeverstalSteelDataset, which uses tf.data instead.
@@ -122,7 +131,10 @@ class SeverstalSteelDatasetPatchGenerator(tf.keras.utils.Sequence):
             img, ann = self.get_example_from_img_name(img_name)
 
             if not self._is_training:
-                val_img_patches, val_ann_patches = self._get_validation_patches(img, ann)
+                val_img_patches, _ = get_image_patches(
+                    img, self._patch_size, self._num_patches_per_image)
+                val_ann_patches, _ = get_image_patches(
+                    ann, self._patch_size, self._num_patches_per_image)
                 img_patches += val_img_patches
                 ann_patches += val_ann_patches
                 continue
@@ -152,17 +164,6 @@ class SeverstalSteelDatasetPatchGenerator(tf.keras.utils.Sequence):
             img_patches, ann_patches = zip(*patches)
 
         return np.stack(img_patches), np.stack(ann_patches)
-
-    def _get_validation_patches(self, img, ann):
-        # TODO: only supports changing x position
-        h, w, _ = img.shape
-        x_step_size = int((w - self._patch_size) / (self._num_patches_per_image - 1))
-        img_patches = []
-        ann_patches = []
-        for x in range(0, w - self._patch_size + 1, x_step_size):
-            img_patches.append(img[0:self._patch_size, x:x+self._patch_size])
-            ann_patches.append(ann[0:self._patch_size, x:x+self._patch_size])
-        return img_patches, ann_patches
 
     def _get_random_patch(self, img, ann):
         h, w, _ = img.shape
@@ -272,92 +273,3 @@ class SeverstalSteelDatasetPatchGenerator(tf.keras.utils.Sequence):
 
         random.shuffle(epoch_examples)
         self._epoch_examples = epoch_examples
-
-
-
-#  class DeepQDataGenerator(tf.keras.utils.Sequence):
-#     def __init__(self,
-#                  base_model,
-#                  steel_dataset,
-#                  dataset_name,
-#                  batch_size,
-#                  threshold=0.85,
-#                  img_height=256,
-#                  img_width=1600,
-#                  shuffle=True):
-#         self._rle_preds = []
-#         self._scores = []
-#         self._batch_size = batch_size
-#         self._img_height = img_height
-#         self._img_width = img_width
-#         self._shuffle = shuffle
-
-#          img_list = steel_dataset.get_image_list(dataset_name)
-#         for i in range(0, len(img_list), self._batch_size):
-#             print(f'Preparing dataset batch {i / self._batch_size} / {len(img_list) / self._batch_size}...')
-#             img_batch = []
-#             ann_batch = []
-#             for img_name in img_list[i:i+self._batch_size]:
-#                 img, ann = steel_dataset.get_example_from_img_name(img_name)
-#                 img_batch.append(img)
-#                 ann_batch.append(ann)
-#             img_batch = np.stack(img_batch, axis=0)
-#             ann_batch = np.stack(ann_batch, axis=0)
-
-#              y_batch = base_model.predict(img_batch)
-#             y_post_batch = postprocess(y_batch, thresh=threshold)
-#             print(f'y_post_batch.shape: {y_post_batch.shape}')
-#             for i in range(self._batch_size):
-#                 rles = []
-#                 scores = []
-#                 for c in range(y_post_batch.shape[-1]):
-#                     # Score if we use the mask
-#                     score_mask = dice_coeff_kaggle(y_post_batch[i, :, :, c:c+1],
-#                                                    ann_batch[i, :, :, c:c+1])
-#                     # Score if we predict empty
-#                     score_no_mask = dice_coeff_kaggle(np.zeros_like(y_post_batch[i, :, :, c:c+1]),
-#                                                       ann_batch[i, :, :, c:c+1])
-#                     scores.append({'mask': score_mask, 'no_mask': score_no_mask})
-#                     rles.append(dense_to_rle(y_post_batch[i, :, :, c]))
-#                 self._rle_preds.append(rles)
-#                 self._scores.append(scores)
-
-#          self.on_epoch_end()
-
-#      def __len__(self):
-#         '''Number of batches per epoch'''
-#         return int(np.floor(len(self._scores) / self._batch_size))
-
-#      def __getitem__(self, index):
-#         '''Generate one batch of data'''
-#         indexes = self._indexes[index*self._batch_size:(index+1)*self._batch_size]
-#         batch_rles = [self._rle_preds[i] for i in indexes]
-#         batch_scores = [self._scores[i] for i in indexes]
-
-#          x_batch = []
-#         y_batch = []
-
-#          for i in range(len(batch_rles)):
-#             # Create single X from RLE
-#             x = []
-#             for rle in batch_rles[i]:
-#                 x.append(rle_to_dense(rle, self._img_height, self._img_width))
-#             x = np.stack(x, axis=-1)
-
-#              # Create single y
-#             y = []
-#             for score_pair in batch_scores[i]:
-#                 y.append([score_pair['mask'], score_pair['no_mask']])
-#             y = np.array(y)
-#             x_batch.append(x)
-#             y_batch.append(y)
-
-#          x_batch = np.stack(x_batch, axis=0)
-#         y_batch = np.stack(y_batch, axis=0)
-#         return x_batch, y_batch
-
-#      def on_epoch_end(self):
-#         '''Shuffle indexes after each epoch'''
-#         self._indexes = np.arange(len(self._scores))
-#         if self._shuffle == True:
-#             np.random.shuffle(self._indexes)
