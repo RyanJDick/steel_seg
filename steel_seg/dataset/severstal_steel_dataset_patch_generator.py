@@ -6,7 +6,7 @@ import tensorflow as tf
 import random
 from PIL import Image
 
-from steel_seg.dataset.severstal_steel_dataset import load_annotations
+from steel_seg.dataset.dataset_utils import load_annotations
 from steel_seg.utils import rle_to_dense, dense_to_rle
 from steel_seg.image_augmentation import adjust_brightness_and_contrast
 
@@ -22,9 +22,6 @@ def get_image_patches(img, patch_size, num_patches_per_image):
 
 class SeverstalSteelDatasetPatchGenerator(tf.keras.utils.Sequence):
     '''Dataset generator that generates patches of Severstal Steel images.
-    This is slower than the SeverstalSteelDataset, which uses tf.data instead.
-    The reason for writing a custom generator is to allow for more direct control
-    over patch sampling.
     '''
 
     def __init__(self,
@@ -85,7 +82,7 @@ class SeverstalSteelDatasetPatchGenerator(tf.keras.utils.Sequence):
             img_height=cfg['IMG_HEIGHT'],
             img_width=cfg['IMG_WIDTH'],
             num_classes=cfg['NUM_CLASSES'],
-            batch_size=cfg['BATCH_SIZE'],
+            batch_size=cfg['PATCH_BATCH_SIZE'],
             brightness_max_delta=cfg['BRIGHTNESS_MAX_DELTA'],
             contrast_lower_factor=cfg['CONTRAST_LOWER_FACTOR'],
             contrast_upper_factor=cfg['CONTRAST_UPPER_FACTOR'],

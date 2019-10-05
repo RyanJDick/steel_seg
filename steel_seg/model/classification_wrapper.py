@@ -9,9 +9,11 @@ def build_classification_model(
     kernel_size=[3, 3],
     num_conv_features=16,
     conv_activation=tf.keras.activations.elu,
-    kernel_initializer='he_normal'):
+    kernel_initializer='he_normal',
+    drop_prob=0.5,
+    base_model_trainable=False):
 
-    base_model.trainable = False
+    base_model.trainable = base_model_trainable
     x = base_model.get_layer(last_feature_layer).output
     x = tf.keras.layers.Conv2D(
         num_conv_features,
@@ -20,12 +22,14 @@ def build_classification_model(
         kernel_initializer=kernel_initializer,
         padding='same')(x)
     x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dropout(drop_prob)(x)
     cls_output = tf.keras.layers.Dense(num_classes, activation=tf.keras.activations.sigmoid, name='classification_output')(x)
 
     inputs = base_model.get_layer(input_layer).input
 
-    seg_output = base_model.get_layer(output_layer).output
-    print(seg_output)
+    #seg_output = base_model.get_layer(output_layer).output
+    #print(seg_output)
 
-    model = tf.keras.Model(inputs=[inputs], outputs=[seg_output, cls_output])
+    #model = tf.keras.Model(inputs=[inputs], outputs=[seg_output, cls_output])
+    model = tf.keras.Model(inputs=[inputs], outputs=[cls_output])
     return model
