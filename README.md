@@ -14,11 +14,10 @@ https://github.com/qubvel/segmentation_models#simple-training-pipeline
     - Jacquard?
     - Focal loss?
 - Try to get MixedPrecision actually working - and write a blog post about it
-- Dataset generator for non-patch segmentation for easy oversampling
 - Retry training non-patch model? (With oversampling of classes)
 - Cropping augmentations
 - Get rid of old dataset class
 
-- Test time augmentation
 - ensemble of multiple models (maybe same model trained on different folds?)
 - more affine augmentations during training
+- If I go back to patches, change the code to oversample more (it seems to still be getting too many empty patches)

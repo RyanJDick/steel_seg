@@ -5,6 +5,7 @@ import numpy as np
 import tensorflow as tf
 import random
 from PIL import Image
+import imgaug.augmenters as iaa
 
 from steel_seg.dataset.dataset_utils import load_annotations
 from steel_seg.utils import rle_to_dense, dense_to_rle
@@ -54,6 +55,8 @@ class SeverstalSteelDatasetGenerator(tf.keras.utils.Sequence):
         if self._balance_classes:
             self._examples_by_class = self._build_examples_by_class_dict()
 
+        self._augmenter = self._build_augmenter()
+
         self._epoch_examples = None
         self.on_epoch_end()
 
@@ -77,6 +80,42 @@ class SeverstalSteelDatasetGenerator(tf.keras.utils.Sequence):
 
         return examples_by_class
 
+    def _build_augmenter(self):
+        sometimes = lambda aug: iaa.Sometimes(0.95, aug)
+
+        augmenter = iaa.Sequential(
+            [
+                iaa.Fliplr(0.5),
+                iaa.Flipud(0.5),
+                iaa.Sometimes(0.8,
+                    iaa.Sequential(
+                        [
+                            sometimes(iaa.Affine(
+                                scale={"x": (0.8, 1.2), "y": (0.8, 1.2)}, # scale images to 80-120% of their size, individually per axis
+                                translate_percent={"x": (-0.2, 0.2), "y": (-0.2, 0.2)}, # translate by -20 to +20 percent (per axis)
+                                rotate=(-5, 5), # rotate by -5 to +5 degrees
+                                shear=(-30, 30), # shear by -16 to +16 degrees
+                                order=[0, 1], # use nearest neighbour or bilinear interpolation (fast)
+                                cval=0, # fill with black pixels
+                                mode='constant', # fill with constant value
+                            )),
+                            sometimes(
+                                iaa.OneOf(
+                                    [
+                                        iaa.ElasticTransformation(alpha=20.0, sigma=5.0),
+                                        iaa.PerspectiveTransform(scale=0.07),
+                                    ]
+                                )
+                            ),
+                            iaa.Multiply((0.8, 1.2)),
+                            iaa.Add((-30, 30)), # change brightness of images (by -30 to 30 of original value)
+                        ]
+                    )
+                ),
+            ]
+        )
+        return augmenter
+
     def __len__(self):
         '''Number of batches per epoch
         '''
@@ -92,41 +131,46 @@ class SeverstalSteelDatasetGenerator(tf.keras.utils.Sequence):
         for img_name in img_names:
             # Load image
             img, ann = self.get_example_from_img_name(img_name)
-            if self._is_training:
-                img, ann = self._apply_augmentations(img, ann)
             imgs.append(img)
             anns.append(ann)
 
         imgs = np.stack(imgs)
         anns = np.stack(anns)
 
+        if self._is_training:
+            imgs, anns = self._apply_augmentations(imgs, anns)
+
         if not self._dense_annotation:
             anns = np.amax(anns, axis=(1, 2))
 
-        return imgs, anns 
+        return imgs, anns
 
-    def _apply_augmentations(self, img, ann):
-        # Concat img and ann so that flips get applied to both
-        img_channels = img.shape[-1]
-        combined = np.concatenate([img, ann], axis=-1)
+    def _apply_augmentations(self, imgs, anns):
+        imgs_aug, anns_aug = self._augmenter(images=imgs, segmentation_maps=anns)
+        return imgs_aug, anns_aug
 
-        if random.choice([True, False]):
-            combined = combined[:, ::-1, :] # Flip left-right
+    # def _apply_augmentations(self, img, ann):
+    #     # Concat img and ann so that flips get applied to both
+    #     img_channels = img.shape[-1]
+    #     combined = np.concatenate([img, ann], axis=-1)
 
-        if random.choice([True, False]):
-            combined = combined[::-1, :, :] # Flip up-down
+    #     if random.choice([True, False]):
+    #         combined = combined[:, ::-1, :] # Flip left-right
 
-        img = combined[:, :, :img_channels]
-        ann = combined[:, :, img_channels:]
+    #     if random.choice([True, False]):
+    #         combined = combined[::-1, :, :] # Flip up-down
 
-        brightness_delta = random.uniform(-1 * self._brightness_max_delta,
-                                          self._brightness_max_delta)
-        contrast_factor = random.uniform(self._contrast_lower_factor,
-                                         self._contrast_upper_factor)
+    #     img = combined[:, :, :img_channels]
+    #     ann = combined[:, :, img_channels:]
 
-        img = adjust_brightness_and_contrast(img, brightness_delta, contrast_factor)
+    #     brightness_delta = random.uniform(-1 * self._brightness_max_delta,
+    #                                       self._brightness_max_delta)
+    #     contrast_factor = random.uniform(self._contrast_lower_factor,
+    #                                      self._contrast_upper_factor)
 
-        return img, ann
+    #     img = adjust_brightness_and_contrast(img, brightness_delta, contrast_factor)
+
+    #     return img, ann
 
     def get_example_from_img_name(self, img_name):
         # Load image

@@ -37,7 +37,9 @@ class SeverstalSteelDatasetPatchGenerator(tf.keras.utils.Sequence):
                  contrast_lower_factor,
                  contrast_upper_factor,
                  patch_size,
-                 num_patches_per_image):
+                 num_patches_per_image,
+                 balance_classes,
+                 max_oversample_rate):
         self._img_list = img_list
         self._is_training = is_training
 
@@ -56,39 +58,19 @@ class SeverstalSteelDatasetPatchGenerator(tf.keras.utils.Sequence):
         self._patch_size = patch_size
         self._num_patches_per_image = num_patches_per_image
 
+        self._balance_classes = balance_classes
+        self._max_oversample_rate = max_oversample_rate
+
         self._anns_dict = load_annotations(self._train_anns_file)
 
-        self._examples_by_class = self._build_examples_by_class_dict()
+        if self._balance_classes:
+            self._examples_by_class = self._build_examples_by_class_dict()
 
         # So that we dont have to share images between batches
         assert self._batch_size % self._num_patches_per_image == 0
 
         self._epoch_examples = None
         self.on_epoch_end()
-
-    @classmethod
-    def init_from_config(cls, config_path, img_list, is_training):
-        with open(config_path) as f:
-            cfg = yaml.load(f)
-
-        num_patches_per_image = cfg['NUM_PATCHES_PER_IMAGE_TRAIN'] if is_training \
-            else cfg['NUM_PATCHES_PER_IMAGE_VAL']
-
-        return cls(
-            img_list=img_list,
-            is_training=is_training,
-            train_img_dir=cfg['TRAIN_IMAGE_DIR'],
-            train_anns_file=cfg['TRAIN_ANNOTATIONS_FILE'],
-            img_height=cfg['IMG_HEIGHT'],
-            img_width=cfg['IMG_WIDTH'],
-            num_classes=cfg['NUM_CLASSES'],
-            batch_size=cfg['PATCH_BATCH_SIZE'],
-            brightness_max_delta=cfg['BRIGHTNESS_MAX_DELTA'],
-            contrast_lower_factor=cfg['CONTRAST_LOWER_FACTOR'],
-            contrast_upper_factor=cfg['CONTRAST_UPPER_FACTOR'],
-            patch_size=cfg['PATCH_SIZE'],
-            num_patches_per_image=num_patches_per_image,
-        )
 
     def _build_examples_by_class_dict(self):
         examples_by_class = defaultdict(list)
@@ -246,22 +228,26 @@ class SeverstalSteelDatasetPatchGenerator(tf.keras.utils.Sequence):
             self._epoch_examples = [(img_name, None) for img_name in self._img_list]
             return
 
+        if not self._balance_classes:
+            self._epoch_examples = self._img_list.copy()
+            random.shuffle(self._epoch_examples)
+            return
+
         # Set images_per_class_per_epoch to the number of images in the largest class
         images_per_class_per_epoch = 0
         for class_name, examples in self._examples_by_class.items():
             if len(examples) > images_per_class_per_epoch:
                 images_per_class_per_epoch = len(examples)
 
-        max_oversample_rate = 5
         epoch_examples = []
         for class_name, examples in self._examples_by_class.items():
             # Figure out appropriate oversample_rate for images containing current class
             num_examples = len(examples)
             oversample_rate = images_per_class_per_epoch / num_examples
-            if oversample_rate > max_oversample_rate:
+            if oversample_rate > self._max_oversample_rate:
                 print(f'Oversample rate of {oversample_rate} for class {class_name} is too large.'
-                      f'Setting to {max_oversample_rate}.')
-                oversample_rate = max_oversample_rate
+                      f'Setting to {self._max_oversample_rate}.')
+                oversample_rate = self._max_oversample_rate
 
             # Add oversampled images to epoch
             random.shuffle(examples)
