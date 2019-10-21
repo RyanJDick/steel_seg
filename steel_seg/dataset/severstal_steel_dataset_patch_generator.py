@@ -5,6 +5,7 @@ import numpy as np
 import tensorflow as tf
 import random
 from PIL import Image
+import imgaug.augmenters as iaa
 
 from steel_seg.dataset.dataset_utils import load_annotations
 from steel_seg.utils import rle_to_dense, dense_to_rle
@@ -62,6 +63,8 @@ class SeverstalSteelDatasetPatchGenerator(tf.keras.utils.Sequence):
         self._max_oversample_rate = max_oversample_rate
 
         self._anns_dict = load_annotations(self._train_anns_file)
+
+        self._augmenter = self._build_augmenter()
 
         if self._balance_classes:
             self._examples_by_class = self._build_examples_by_class_dict()
@@ -121,19 +124,19 @@ class SeverstalSteelDatasetPatchGenerator(tf.keras.utils.Sequence):
             if target_class == 'no_class':
                 random_patches_per_image = self._num_patches_per_image
             else:
-                random_patches_per_image = int(self._num_patches_per_image / 2)
+                random_patches_per_image = 0 #int(self._num_patches_per_image / 2)
 
             # Get random patches from current image
             for _ in range(random_patches_per_image):
                 img_patch, ann_patch = self._get_random_patch(img, ann)
-                img_patch, ann_patch = self._apply_augmentations(img_patch, ann_patch)
+                #img_patch, ann_patch = self._apply_augmentations(img_patch, ann_patch)
                 img_patches.append(img_patch)
                 ann_patches.append(ann_patch)
 
             # Get heuristic-targeted patches from current image
             for _ in range(self._num_patches_per_image - random_patches_per_image):
                 img_patch, ann_patch = self._get_targeted_patch(img, ann, target_class)
-                img_patch, ann_patch = self._apply_augmentations(img_patch, ann_patch)
+                #img_patch, ann_patch = self._apply_augmentations(img_patch, ann_patch)
                 img_patches.append(img_patch)
                 ann_patches.append(ann_patch)
 
@@ -142,7 +145,12 @@ class SeverstalSteelDatasetPatchGenerator(tf.keras.utils.Sequence):
             random.shuffle(patches)
             img_patches, ann_patches = zip(*patches)
 
-        return np.stack(img_patches), np.stack(ann_patches)
+        img_patches = np.stack(img_patches)
+        ann_patches = np.stack(ann_patches)
+
+        img_patches, ann_patches = self._apply_augmentations(img_patches, ann_patches)
+
+        return img_patches, ann_patches
 
     def _get_random_patch(self, img, ann):
         h, w, _ = img.shape
@@ -178,27 +186,67 @@ class SeverstalSteelDatasetPatchGenerator(tf.keras.utils.Sequence):
 
         return img_patch, ann_patch
 
-    def _apply_augmentations(self, img, ann):
-        # Concat img and ann so that flips get applied to both
-        img_channels = img.shape[-1]
-        combined = np.concatenate([img, ann], axis=-1)
+    def _apply_augmentations(self, imgs, anns):
+        imgs_aug, anns_aug = self._augmenter(images=imgs, segmentation_maps=anns)
+        return imgs_aug, anns_aug
 
-        if random.choice([True, False]):
-            combined = combined[:, ::-1, :] # Flip left-right
+    # def _apply_augmentations(self, img, ann):
+    #     # Concat img and ann so that flips get applied to both
+    #     img_channels = img.shape[-1]
+    #     combined = np.concatenate([img, ann], axis=-1)
 
-        if random.choice([True, False]):
-            combined = combined[::-1, :, :] # Flip up-down
+    #     if random.choice([True, False]):
+    #         combined = combined[:, ::-1, :] # Flip left-right
 
-        img = combined[:, :, :img_channels]
-        ann = combined[:, :, img_channels:]
+    #     if random.choice([True, False]):
+    #         combined = combined[::-1, :, :] # Flip up-down
 
-        brightness_delta = random.uniform(-1 * self._brightness_max_delta,
-                                          self._brightness_max_delta)
-        contrast_factor = random.uniform(self._contrast_lower_factor,
-                                         self._contrast_upper_factor)
+    #     img = combined[:, :, :img_channels]
+    #     ann = combined[:, :, img_channels:]
 
-        img = adjust_brightness_and_contrast(img, brightness_delta, contrast_factor)
-        return img, ann
+    #     brightness_delta = random.uniform(-1 * self._brightness_max_delta,
+    #                                       self._brightness_max_delta)
+    #     contrast_factor = random.uniform(self._contrast_lower_factor,
+    #                                      self._contrast_upper_factor)
+
+    #     img = adjust_brightness_and_contrast(img, brightness_delta, contrast_factor)
+    #     return img, ann
+
+    def _build_augmenter(self):
+        sometimes = lambda aug: iaa.Sometimes(0.95, aug)
+
+        augmenter = iaa.Sequential(
+            [
+                iaa.Fliplr(0.5),
+                iaa.Flipud(0.5),
+                iaa.Sometimes(0.8,
+                    iaa.Sequential(
+                        [
+                            sometimes(iaa.Affine(
+                                scale={"x": (0.8, 1.2), "y": (0.8, 1.2)}, # scale images to 80-120% of their size, individually per axis
+                                translate_percent={"x": (-0.2, 0.2), "y": (-0.2, 0.2)}, # translate by -20 to +20 percent (per axis)
+                                rotate=(-5, 5), # rotate by -5 to +5 degrees
+                                shear=(-30, 30), # shear by -16 to +16 degrees
+                                order=[0, 1], # use nearest neighbour or bilinear interpolation (fast)
+                                cval=0, # fill with black pixels
+                                mode='constant', # fill with constant value
+                            )),
+                            sometimes(
+                                iaa.OneOf(
+                                    [
+                                        iaa.ElasticTransformation(alpha=20.0, sigma=5.0),
+                                        iaa.PerspectiveTransform(scale=0.07),
+                                    ]
+                                )
+                            ),
+                            iaa.Multiply((0.8, 1.2)),
+                            iaa.Add((-30, 30)), # change brightness of images (by -30 to 30 of original value)
+                        ]
+                    )
+                ),
+            ]
+        )
+        return augmenter
 
     def get_example_from_img_name(self, img_name):
         # Load image
