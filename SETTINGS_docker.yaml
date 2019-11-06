@@ -1,0 +1,43 @@
+# Raw Data
+TRAIN_IMAGE_DIR: /src/steel_seg/data/severstal-steel-defect-detection/train_images/
+TRAIN_ANNOTATIONS_FILE: /src/steel_seg/data/severstal-steel-defect-detection/train.csv
+TEST_IMAGE_DIR: /src/steel_seg/data/severstal-steel-defect-detection/test_images/
+
+IMG_HEIGHT: 256
+IMG_WIDTH: 1600
+NUM_CLASSES: 4
+
+###########################
+# For segmentation dataset:
+###########################
+
+# TFRecord Files
+TRAIN_TFRECORD_DIR: /src/steel_seg/data/severstal_steel_train_tfrecords
+TRAIN_BASE_TFRECORD_FILENAME: severstal_steel_train_
+VAL_TFRECORD_DIR: /src/steel_seg/data/severstal_steel_val_tfrecords
+VAL_BASE_TFRECORD_FILENAME: severstal_steel_val_
+VAL_SPLIT: 0.1
+EXAMPLES_PER_TFRECORD: 2000
+
+# Augmentation
+BRIGHTNESS_MAX_DELTA: 0.3 #0.3
+CONTRAST_LOWER_FACTOR: 0.8 #0.8
+CONTRAST_UPPER_FACTOR: 1.2 #1.2
+BATCH_SIZE: 8
+
+# Patches
+PATCH_SIZE: 256 # Same as image height
+NUM_PATCHES_PER_IMAGE_TRAIN: 4
+NUM_PATCHES_PER_IMAGE_VAL: 8
+
+
+############################################
+# For postprocessing classification dataset:
+############################################
+POSTPROCESS_TRAIN_TFRECORD_DIR: /src/steel_seg/data/severstal_steel_postprocess_train_tfrecords
+POSTPROCESS_TRAIN_BASE_TFRECORD_FILENAME: severstal_steel_postprocess_train_
+POSTPROCESS_VAL_TFRECORD_DIR: /src/steel_seg/data/severstal_steel_postprocess_val_tfrecords
+POSTPROCESS_VAL_BASE_TFRECORD_FILENAME: severstal_steel_postprocess_val_
+POSTPROCESS_VAL_SPLIT: 0.1
+POSTPROCESS_EXAMPLES_PER_TFRECORD: 2000
+POSTPROCESS_BATCH_SIZE: 8

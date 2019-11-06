@@ -31,24 +31,6 @@ def jaccard_distance_loss(y_true, y_pred, smooth=100):
     jac = (intersection + smooth) / (sum_ - intersection + smooth)
     return (1 - jac) * smooth
 
-
-def focal_loss(alpha=0.25, gamma=2):
-    def focal_loss_with_logits(logits, targets, alpha, gamma, y_pred):
-        weight_a = alpha * (1 - y_pred) ** gamma * targets
-        weight_b = (1 - alpha) * y_pred ** gamma * (1 - targets)
-
-        return (tf.log1p(tf.exp(-tf.abs(logits))) + tf.nn.relu(-logits)) * (weight_a + weight_b) + logits * weight_b 
-
-    def loss(y_true, y_pred):
-        y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1 - tf.keras.backend.epsilon())
-        logits = tf.log(y_pred / (1 - y_pred))
-
-        loss = focal_loss_with_logits(logits=logits, targets=y_true, alpha=alpha, gamma=gamma, y_pred=y_pred)
-
-        return tf.reduce_mean(loss)
-
-    return loss
-
 def dice_coef_channel_helper(y_true, y_pred):
     '''Helper funtion used by dice metrics to compute the dice score for a single image and class.
     '''
@@ -227,6 +209,31 @@ def pixel_map_weighted_binary_crossentropy(cls_weights, from_logits=False):
         loss = tf.reduce_mean(weighted_loss)
         return loss
     return _pixel_map_weighted_binary_crossentropy
+
+def pixel_map_weighted_focal_loss(cls_weights, alpha=0.25, gamma=2):
+    def focal_loss_with_logits(logits, targets, alpha, gamma, y_pred):
+        weight_a = alpha * (1 - y_pred) ** gamma * targets
+        weight_b = (1 - alpha) * y_pred ** gamma * (1 - targets)
+
+        return (tf.log1p(tf.exp(-tf.abs(logits))) + tf.nn.relu(-logits)) * (weight_a + weight_b) + logits * weight_b
+
+    def _pixel_map_weighted_focal_loss(target, ouput):
+        assert len(output.op.inputs) == 1
+        logits = output.op.inputs[0]
+
+        y_pred = tf.clip_by_value(ouput, tf.keras.backend.epsilon(), 1 - tf.keras.backend.epsilon())
+
+        class_weights = tf.constant(np.array(cls_weights, dtype=np.float32))
+
+        weight_map = tf.multiply(target, class_weights) # Multiply class weights at every pixel
+        weight_map = tf.reduce_sum(weight_map, axis=-1, keepdims=True) # Sum weights pixelwise
+        weight_map += 1.0
+
+        loss_map = focal_loss_with_logits(logits, target, alpha, gamma, y_pred)
+        weighted_loss = tf.multiply(loss_map, weight_map)
+
+        loss = tf.reduce_mean(weighted_loss)
+        return loss
 
 def class_weighted_binary_classification_crossentropy(cls_weights, from_logits=False):
     '''Loss function used by binary mask classifier (NOT dense segmentation)
