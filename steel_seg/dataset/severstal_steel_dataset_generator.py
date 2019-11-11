@@ -9,7 +9,6 @@ import imgaug.augmenters as iaa
 
 from steel_seg.dataset.dataset_utils import load_annotations
 from steel_seg.utils import rle_to_dense, dense_to_rle
-from steel_seg.image_augmentation import adjust_brightness_and_contrast
 
 
 class SeverstalSteelDatasetGenerator(tf.keras.utils.Sequence):
@@ -148,29 +147,6 @@ class SeverstalSteelDatasetGenerator(tf.keras.utils.Sequence):
     def _apply_augmentations(self, imgs, anns):
         imgs_aug, anns_aug = self._augmenter(images=imgs, segmentation_maps=anns)
         return imgs_aug, anns_aug
-
-    # def _apply_augmentations(self, img, ann):
-    #     # Concat img and ann so that flips get applied to both
-    #     img_channels = img.shape[-1]
-    #     combined = np.concatenate([img, ann], axis=-1)
-
-    #     if random.choice([True, False]):
-    #         combined = combined[:, ::-1, :] # Flip left-right
-
-    #     if random.choice([True, False]):
-    #         combined = combined[::-1, :, :] # Flip up-down
-
-    #     img = combined[:, :, :img_channels]
-    #     ann = combined[:, :, img_channels:]
-
-    #     brightness_delta = random.uniform(-1 * self._brightness_max_delta,
-    #                                       self._brightness_max_delta)
-    #     contrast_factor = random.uniform(self._contrast_lower_factor,
-    #                                      self._contrast_upper_factor)
-
-    #     img = adjust_brightness_and_contrast(img, brightness_delta, contrast_factor)
-
-    #     return img, ann
 
     def get_example_from_img_name(self, img_name):
         # Load image

@@ -17,7 +17,6 @@ TRAIN_BASE_TFRECORD_FILENAME: severstal_steel_train_
 VAL_TFRECORD_DIR: /src/steel_seg/data/severstal_steel_val_tfrecords
 VAL_BASE_TFRECORD_FILENAME: severstal_steel_val_
 VAL_SPLIT: 0.1
-EXAMPLES_PER_TFRECORD: 2000
 
 # Augmentation
 BRIGHTNESS_MAX_DELTA: 0.3 #0.3
@@ -29,15 +28,3 @@ BATCH_SIZE: 8
 PATCH_SIZE: 256 # Same as image height
 NUM_PATCHES_PER_IMAGE_TRAIN: 4
 NUM_PATCHES_PER_IMAGE_VAL: 8
-
-
-############################################
-# For postprocessing classification dataset:
-############################################
-POSTPROCESS_TRAIN_TFRECORD_DIR: /src/steel_seg/data/severstal_steel_postprocess_train_tfrecords
-POSTPROCESS_TRAIN_BASE_TFRECORD_FILENAME: severstal_steel_postprocess_train_
-POSTPROCESS_VAL_TFRECORD_DIR: /src/steel_seg/data/severstal_steel_postprocess_val_tfrecords
-POSTPROCESS_VAL_BASE_TFRECORD_FILENAME: severstal_steel_postprocess_val_
-POSTPROCESS_VAL_SPLIT: 0.1
-POSTPROCESS_EXAMPLES_PER_TFRECORD: 2000
-POSTPROCESS_BATCH_SIZE: 8

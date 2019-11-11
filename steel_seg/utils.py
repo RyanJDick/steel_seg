@@ -81,6 +81,7 @@ def onehottify(x, n=None, dtype=float):
     n = np.max(x) + 1 if n is None else n
     return np.eye(n, dtype=dtype)[x]
 
+
 def print_cm(cm, labels, hide_zeroes=False, hide_diagonal=False, hide_threshold=None):
     """pretty print for confusion matrixes"""
     columnwidth = max([len(x) for x in labels] + [5])  # 5 is value length

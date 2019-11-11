@@ -7,8 +7,6 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras import backend as K
 
-from steel_seg.dataset.severstal_steel_dataset import SeverstalSteelDataset
-from steel_seg.model.unet import build_unet_model, postprocess
 from steel_seg.utils import dice_coeff_kaggle
 
 
@@ -61,48 +59,6 @@ def dice_coef(batch_size, num_classes=4):
         return tf.add_n(batch_scores) / (batch_size * num_classes)
     return _dice_coef
 
-
-# class DiceCoefByClassAndEmptiness(tf.keras.metrics.Metric):
-#     def __init__(
-#         self,
-#         cls_id,
-#         empty_masks_only,
-#         batch_size,
-#         name='dice_coef_by_class_and_emptiness',
-#         **kwargs
-#     ):
-#         super(DiceCoefByClassAndEmptiness, self).__init__(name=name, **kwargs)
-#         self.cls_id = cls_id
-#         self.empty_masks_only = empty_masks_only
-#         self.batch_size = batch_size
-#         self.dice_score_sum = self.add_weight(name='dice_score_sum', initializer='zeros')
-#         self.dice_score_count = self.add_weight(name='dice_score_count', initializer='zeros')
-
-#     def update_state(self, y_true, y_pred, sample_weight=None):
-#         if sample_weight is not None:
-#             raise NotImplementedError("sample_weight not supported by DiceCoefOnEmptyByClass")
-#         sample_scores = []
-#         sample_weights = []
-#         for b in range(self.batch_size):
-#             dice_score = dice_coef_channel_helper(
-#                 y_true[b, :, :, self.cls_id],
-#                 y_pred[b, :, :, self.cls_id])
-
-#             def on_gt_empty():
-#                 if self.empty_masks_only:
-#                     self.dice_score_sum.assign_add(tf.add_n(batch_scores))
-#                     self.dice_score_count.assign_add(len(batch_scores))
-
-#             def on_gt_not_empty():
-#                 if not self.empty_masks_only:
-#                     self.dice_score_sum.assign_add(tf.add_n(batch_scores))
-#                     self.dice_score_count.assign_add(len(batch_scores))
-
-#             tf.cond(gt_is_empty, on_gt_empty, on_gt_not_empty)
-
-#     def result(self):
-#         return self.dice_score_sum / self.dice_score_count
-
 class DiceCoefByClassAndEmptiness(tf.keras.metrics.Mean):
     '''
     '''
@@ -138,12 +94,6 @@ class DiceCoefByClassAndEmptiness(tf.keras.metrics.Mean):
 
         return super(DiceCoefByClassAndEmptiness, self).update_state(
             sample_scores, sample_weight=sample_weights)
-
-def dice_coef_loss(y_true, y_pred):
-    y_true_f = K.flatten(y_true)
-    y_pred_f = K.flatten(y_pred)
-    intersection = K.sum(y_true_f * y_pred_f)
-    return 1 - (2. * intersection + smooth) / (K.sum(y_true_f) + K.sum(y_pred_f) + smooth)
 
 def dice_loss_multi_class(y_true, y_pred):
     smooth = 0.0001
@@ -270,15 +220,3 @@ def binary_accuracy_by_class(cls_id, threshold=0.5):
     fn = _binary_accuracy_by_class
     fn.__name__ += f'_{cls_id}' # Hack to get the cls_id in the metric name
     return fn
-
-def eval(model, dataset, img_list, threshold=0.5):
-    dice_coeffs = []
-    for img_name in img_list:
-        img, ann = dataset.get_example_from_img_name(img_name)
-        img_batch = np.expand_dims(img, axis=0)
-        y = model.predict(img_batch)
-        y_one_hot = postprocess(y, threshold)
-        dice_coeffs.append(dice_coeff_kaggle(y_one_hot[0, :, :, :], ann))
-    mean_dice_coeff = np.mean(dice_coeffs)
-    print(f'Mean dice coeff: {mean_dice_coeff}')
-    return mean_dice_coeff
