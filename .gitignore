@@ -1,5 +1,12 @@
-# Data directory
+# Project-specific
+checkpoints/
+classification_checkpoints/
+classification_logs/
 data/
+data_split/
+logs/
+saved_models/
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -105,3 +112,6 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+# VSCode
+.vscode
